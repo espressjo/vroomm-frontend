@@ -1,0 +1,3 @@
+*.fits
+*.o
+*__pycache__/
