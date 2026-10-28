@@ -1,3 +1,5 @@
+import glob
+import os
 import re
 import numpy as np
 
@@ -123,7 +125,112 @@ class ZemaxPSF:
                 f"scale={self.scale} um, ref={self.reference_coordinate})")
 
 
+class PSFSet:
+    """All the PSFs of the instrument, with lookup by detector location.
+
+    Selection follows the radial-zone rule of `GuidingSimulator.psf_index`:
+    along one direction, PSF i is used for r in [r_i, r_{i+1}) and the last
+    PSF beyond it, so a location closer than the second PSF uses the first.
+
+    PSFs are not assumed to be symmetric about the field centre. Each PSF has
+    a position angle (from its reference coordinate); a query is first matched
+    to the closest direction, then the radial rule is applied among the PSFs
+    of that direction. PSFs on the axis (r = 0) are shared by every direction.
+    With PSFs along a single direction only (current data), every location
+    uses that direction.
+
+    Parameters
+    ----------
+    files : list of str, optional
+        Zemax PSF files (any order). Defaults to ``psf/psf-*.txt`` next to
+        this script.
+    angle_tol_deg : float
+        PSFs whose position angles differ by less than this are considered to
+        lie along the same direction.
+    """
+
+    def __init__(self, files=None, angle_tol_deg=1.0):
+        if files is None:
+            here = os.path.dirname(os.path.abspath(__file__))
+            files = sorted(glob.glob(os.path.join(here, "psf", "psf-*.txt")))
+        if not files:
+            raise ValueError("No PSF files given")
+        self.psfs = [ZemaxPSF(f) for f in files]
+
+        xy = np.array([p.reference_coordinate for p in self.psfs])
+        self.radius_mm = np.hypot(xy[:, 0], xy[:, 1])
+        self.angle = np.degrees(np.arctan2(xy[:, 1], xy[:, 0]))
+
+        on_axis = self.radius_mm < 1e-9
+        self._axis = list(np.flatnonzero(on_axis))
+
+        # Group off-axis PSFs by direction: list of (angle, [indices by radius])
+        self._dirs = []
+        for i in np.flatnonzero(~on_axis):
+            for d in self._dirs:
+                if abs(_wrap(self.angle[i] - d[0])) < angle_tol_deg:
+                    d[1].append(i)
+                    break
+            else:
+                self._dirs.append((self.angle[i], [i]))
+        for _, idx in self._dirs:
+            idx.sort(key=lambda i: self.radius_mm[i])
+
+    # ------------------------------------------------------------------
+    def index(self, x_mm, y_mm):
+        """Index (into `self.psfs`) of the PSF for a detector location (mm)."""
+        r = np.hypot(x_mm, y_mm)
+        if self._dirs:
+            theta = np.degrees(np.arctan2(y_mm, x_mm)) if r > 0 else 0.0
+            _, chain = min(self._dirs,
+                           key=lambda d: abs(_wrap(theta - d[0])))
+        else:
+            chain = []
+        chain = self._axis + chain
+        radii = self.radius_mm[chain]
+        k = np.searchsorted(radii, r, side="right") - 1
+        return chain[int(np.clip(k, 0, len(chain) - 1))]
+
+    def get(self, x_mm, y_mm):
+        """PSF (ZemaxPSF) for a detector location (x, y) in mm from the centre."""
+        return self.psfs[self.index(x_mm, y_mm)]
+
+    __call__ = get
+
+    def __len__(self):
+        return len(self.psfs)
+
+    def __iter__(self):
+        return iter(self.psfs)
+
+    def __getitem__(self, i):
+        return self.psfs[i]
+
+    def __repr__(self):
+        return f"PSFSet({len(self)} PSFs, {len(self._dirs)} direction(s))"
+
+
+def _wrap(a):
+    """Wrap an angle difference (deg) to [-180, 180)."""
+    return (a + 180.0) % 360.0 - 180.0
+
+
 if __name__ == "__main__":
-    psf = ZemaxPSF("./psf/psf-1.txt")
+    S = PSFSet()
+    p1 = S.get(1,1)
+    p2 = S.get(2,2)
+    p3 = S.get(3,3)
+    p4 = S.get(4,4)
+    p5 = S.get(5,5)
+    p1.show()
+    p2.show()
+    p3.show()
+    p4.show()
+    p5.show()
+    #manage single PSF
+    """
+    psf = ZemaxPSF("./psf/psf-3.txt")
     print(psf)
     print(psf.data.max(), psf.data.argmax())
+    psf.show()
+    """
