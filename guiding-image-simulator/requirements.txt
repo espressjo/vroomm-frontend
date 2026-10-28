@@ -1,0 +1,7 @@
+numpy
+scipy
+astropy
+astroquery
+matplotlib
+# only for flux-scaling-analysis/flux_scale.py
+photutils

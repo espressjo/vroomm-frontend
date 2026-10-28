@@ -282,6 +282,7 @@ if __name__ == "__main__":
     from astropy.io import fits
     hdr = fits.Header()
     hdr["CRVAL1"], hdr["CRVAL2"] = args.ra, args.dec
+    hdr["RA"], hdr["DEC"] = args.ra, args.dec
     hdr["EXPTIME"] = (args.exposure, "s")
     hdr["SEEING"] = (args.seeing, "arcsec FWHM")
     hdr["CCDTEMP"] = (args.temperature, "deg C")
